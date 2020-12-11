@@ -1,0 +1,248 @@
+---
+title: "Figure2.Rmd"
+author: "James Abbott"
+date: "10/08/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(limma)
+library(tidyr)
+library(tibble)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(ggrastr)
+library(ggrepel)
+library(cowplot)
+```
+## Dataload
+
+The following files which are generated in the NT_metagenomic_assembly.ipynb notebook are required in the current working directory. 
+
+* `go_table.txt` contains the full set of GO terms as a tab-delimited file. This is produced from an OBO format GO ontology using the `obo_to_tab.py` script (see NT_metagenomic_assembly.ipynb). 
+  It contains the following fields:
+  
+  1: GO ID
+  2: Namespace
+  3: Term
+  
+* `go_count_table.txt` contains per-sample counts of GO terms. This is a tab-delimited file with the GO terms in the first column, followed by a column for each sample. This is produced by the 'count_go_terms.py' script
+
+* `goslim_count_table.txt` is the same format as `go_count_table.txt` but contains counts mapped to the GO Microbiome slim terms.
+
+  Sample mapping is as follows:
+  
+  | ID | Replicate |
+  |----|-----------|
+  | 2000 | Elite_1 |
+  | 2001 | Elite_2 |
+  | 2002 | Elite_3 |
+  | 2006 | Desert_1 |
+  | 2007 | Desert_2 |
+  | 2009 | Desert_3 |
+  | 2011 | North_1 |
+  | 2012 | North_2 |
+  | 2013 | North_3 |
+  | 2023 | Bulk_1 |
+  | 2024 | Bulk_2 |
+  | 2025 | Bulk_3 |
+
+  The GO terms are first read into a dataframe and split into separate data frames for each namespace
+  
+  The counts of GO and GO Slim term abundance are also read into separate dataframes
+
+```{r dataload}
+columns=c('term','namespace','name')
+go_terms<-read.csv('NT_Figure2_go_table.txt',sep="\t",header=FALSE, col.names = columns)
+
+biological_process<-go_terms %>% filter(namespace == 'biological_process')
+cellular_component<-go_terms %>% filter(namespace == 'cellular_component')
+molecular_function<-go_terms %>% filter(namespace == 'molecular_function')
+
+columns<-c('term', 'Elite_1','Elite_2','Elite_3', 'Desert_1','Desert_2','Desert_3',
+           'North_1','North_2','North_3','Bulk_1','Bulk_2','Bulk_3')
+go_counts<-read.csv('NT_Figure2_go_count_table.txt',sep="\t",header=TRUE)
+colnames(go_counts)<-columns
+slim_counts<-read.csv('NT_Figure2_goslim_count_table.txt',sep="\t",header=TRUE)
+colnames(slim_counts)<-columns
+
+remove(columns)
+```
+
+The GO counts include terms from all 3 namespaces, so these need to be be separated.
+
+```{r subset}
+biol_process_counts<-semi_join(x=go_counts, y=biological_process, by='term')
+slim_biol_process_counts<-semi_join(x=slim_counts,y=biological_process, by='term')
+
+# set row names to term id and drop term column
+row.names(biol_process_counts)<-biol_process_counts$term
+row.names(slim_biol_process_counts)<-slim_biol_process_counts$term
+
+biol_process_counts<-select(biol_process_counts, -term)
+slim_biol_process_counts<-select(slim_biol_process_counts, -term)
+
+# Easier to have go_terms with row names as terms for later analysis, now joins on this table are completed...
+row.names(go_terms)<-go_terms$term
+go_terms<-select(go_terms, -term)
+remove(go_counts, go_counts)
+```
+
+The `enrichment_summary` function produces lists of enriched and depleted terms ('up' and 'down') respectively exceeding a specified fold-change. These are used for subsequent upsettr plots.
+
+```{r enrichment_summary}
+enrichment_summary<-function(prefix,fc){
+  
+  out_path='upsettr/'
+  if (!dir.exists(out_path)) {
+    dir.create(out_path)
+  }
+  prefix<-paste(prefix,'.*txt',sep='')
+  files<-list.files('limma',pattern=prefix)    
+  
+  up_output_terms<-data.frame(Genotype=character(),GO=character())
+  down_output_terms<-data.frame(Genotype=character(),GO=character())
+  for (filename in files) {
+    file_path<-paste('limma/',filename,sep='')
+    
+    prefix<-sub('\\.\\*txt','',prefix)
+    contrast<-sub(prefix,'',filename)
+    contrast<-sub('.txt','',contrast)
+    contrast<-sub('^_','',contrast)
+    
+    in_df<-read.csv(file_path,sep='\t')
+    if ('logFC' %in% colnames(in_df)) {
+      in_df['Genotype']<-contrast
+      up_df<-subset(in_df,logFC > fc)
+      down_df<-subset(in_df,logFC < -fc)
+      
+      out_up_df<-up_df %>% select('Genotype','Row.names') %>% rename(Genotype=Genotype,GO=Row.names)
+      out_down_df<-down_df %>% select('Genotype','Row.names') %>% rename(Genotype=Genotype,GO=Row.names)
+      up_output_terms<-rbind(up_output_terms,out_up_df)
+      down_output_terms<-rbind(down_output_terms,out_down_df)
+    }
+  }
+  
+  prefix<-sub('_$','',prefix)
+  up_out_file<-paste(out_path,prefix,'_up','.txt',sep='')
+  down_out_file<-paste(out_path,prefix,'_down','.txt',sep='')
+  write_tsv(up_output_terms,up_out_file)
+  write_tsv(down_output_terms,down_out_file)
+}
+```
+
+```{r limma_diff_function}
+limma_diff<-function(count_table,name,xmin,xmax,ymin,ymax,fccut,plot=FALSE) {
+  out_path='limma/'
+  if (!dir.exists(out_path)) {
+    dir.create(out_path)
+  }
+  
+  count_table<-log2(data.matrix(count_table))
+  
+  fit<-lmFit(count_table, design)
+  fit2<-contrasts.fit(fit, contrast.matrix)
+  fit2<-eBayes(fit2)
+  
+  plots=list()
+  tables=list()
+  
+  for (i in 1:3) {
+    table<-topTable(fit2, coef=i, adjust='BH', sort.by='logFC', number=50000, p.value=0.05, lfc=fccut) %>% drop_na()
+    table<-merge(table,go_terms,by=0,sort=FALSE)
+    outfile<-paste(out_path, name,'_',contrast_list[i],'.txt',sep='')
+    write.table(table, file=outfile,sep="\t",row.names=FALSE)
+    
+    slim_name<-gsub('_go_','_slim_',name)
+    slim_name<-gsub('_slim_labelled','',slim_name)
+    slim_file=paste0(out_path,slim_name,'_',contrast_list[i],'.txt')
+    slims<-read.csv(slim_file,sep='\t',header=1)
+    
+    if (plot) {
+      #this should capture all GO terms - presently 47k
+      vplot_table<-topTable(fit2,coef=i,adjust='BH',number=50000) %>% drop_na()
+      vplot_table$log10Pval<--log10(vplot_table$adj.P.Val)
+      
+      # points exceeding specified log-fold cutoff
+      highlight_table<-vplot_table %>% filter((logFC>fccut|logFC< -fccut) & (adj.P.Val < 0.05))
+      upregulated_table<-vplot_table %>% filter((logFC>fccut) & (adj.P.Val<0.05))
+      downregulated_table<-vplot_table %>% filter((logFC< -fccut) & (adj.P.Val<0.05))
+      # Plot title needs to reflect orientation of contrasts
+      contrast_col=contrast.matrix[,contrast_list[i]]
+      title_labels<-strsplit(contrast_list[i],'-')[[1]]
+      
+      if (contrast_col[title_labels[[1]]]==-1) {
+        title<-paste(title_labels[[1]],'-',title_labels[[2]])
+      } else {
+        title<-paste(title_labels[[2]],'-',title_labels[[1]])
+      }
+      cat(paste0("\n",title,': ',nrow(upregulated_table)," enriched, ",nrow(downregulated_table)," depleted\n"))
+      colours=c('gray','red')
+      volc<-ggplot(vplot_table)+ 
+        geom_point(data=vplot_table,
+                   aes(x=logFC, y=log10Pval, color = paste0('log2FC <',fccut,' and p-value < 0.05')), 
+                   alpha=0.3, size=1)+
+        geom_point(data=highlight_table,
+                   aes(x=logFC, y=log10Pval, color = paste0('log2FC >',fccut,' and p-value < 0.05')), 
+                   alpha=0.3, size=1)+
+        theme_bw()+theme(panel.grid.major = element_line(size=0.25),panel.grid.minor=element_line(size=0.1))+
+        ylab('-log10 adjusted p-value')+
+        xlab('Log2 fold change')+
+        ggtitle(title)+
+        xlim(xmin,xmax)+
+        ylim(ymin,ymax)+
+        geom_hline(yintercept = -log10(0.05),linetype='dotted',color='grey',width=0.5)+
+        theme(text=element_text(size=10),plot.title = element_text(size=14),axis.text=element_text(size=8)) +
+        scale_color_manual(name = element_blank(), 
+                           labels = c(paste0('log2FC <',fccut,' and p-value < 0.05'), paste0('log2FC >',fccut,' and p-value < 0.05')), 
+                           values = colours)
+    
+      plots[[paste0('plot',i)]]<-volc
+    }
+  }
+
+  all_plots=ggarrange(plots[[1]],
+                      plots[[2]]+rremove("ylab")+theme(axis.text.y = element_blank()),
+                      plots[[3]]+rremove("ylab")+theme(axis.text.y = element_blank()),
+                      nrow=1,
+                      ncol=3,
+                      labels='AUTO',
+                      align='v',
+                      common.legend = TRUE, 
+                      legend="bottom")
+  outfile<-paste(out_path, name,'.svg',sep='')
+  ggsave(outfile,plot=all_plots,device='svg',width=20,height=17,units='cm')
+  
+  enrichment_summary(name,fccut)
+}
+```
+
+```{r de_biolproc}
+
+metadata<-read.csv('NT_Figure2_metadata.txt',sep='\t')
+design<-data.matrix(metadata)
+design<-design[, colnames(design) != "X"]
+
+contrast_list=c( 'Desert-Bulk','North-Bulk', 'Elite-Bulk', 
+                 'Desert-Elite', 'North-Elite', 'Desert-North' )
+contrast.matrix <- makeContrasts(contrasts=contrast_list, levels=design) 
+
+# GO Slim enrichment analysis
+limma_diff(slim_biol_process_counts,
+           name='slim_biol_proc',
+           xmin=-6,xmax=6,ymin=0,ymax=3.5,fccut=0.5,
+           plot=TRUE)
+
+# Full GO enrichment analysis
+limma_diff(biol_process_counts,
+           name='go_biol_proc',
+           xmin=-3,xmax=6,ymin=0,ymax=3.5,fccut=1,
+           plot=TRUE)
+           
+```
+
+
+
