@@ -1,3 +1,7 @@
+# Update Sept. 2022
+
+We have now completed the requested revision and new version of the scripts will be uploaded in the upcoming days
+
 # Barley-NT-2020
 This repository contains scripts and material to reproduce calculations and figures of the manuscript Alegria Terrazas, Robertson-Albertyn et al.,
 
