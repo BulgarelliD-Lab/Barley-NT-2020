@@ -1,19 +1,12 @@
-# Update Sept. 2022
+# Update October 2022
 
-We have now completed the requested revision and new version of the scripts will be uploaded in the upcoming days
+This repository contains scripts and material to reproduce calculations and figures of the manuscript Alegria Terrazas, Robertson-Albertyn et al., https://www.biorxiv.org/content/10.1101/605204v3
 
-# Barley-NT-2020
-This repository contains scripts and material to reproduce calculations and figures of the manuscript Alegria Terrazas, Robertson-Albertyn et al.,
-
-For each composite/sub-figure and/or table we produce a separate script: e.g., NT_Figure_1_S3_1020.R refers to the script needed to reproduce figure and calculatios of both Figure 3 and Figure S3.
-
-Note that the manuscript is the final phase of preparation for submission. Consequently scripts may change during the peer-revision process
-
-# Update Dec 2020
-
-the files for the reproduction of the dada2 ASV picking, Kraken classification and Metagenomics assembly and calculations are in separated folders now. As these are a significant number of items, in the following you'll find the info on how to use them
+For each composite/sub-figure and/or table we produce a separate script: e.g., NT_Figure_1_S3_1020.R refers to the script needed to reproduce figure and calculatios of both Figure 3 and Figure S3. The folder inputfiles contain files required for the reproduction of the codes.
 
 # NT Metagenomic assembly, Kraken and dada2 code
+
+=> we are updating this folder with the revised version of the codes
 
 The code used to carry out the metagenomic assembly and functional classification, Kraken2 classification and dada2 16S classification are contained in separate subdirectories of this directory. The contents of each of subdirectory are as follows:
 
