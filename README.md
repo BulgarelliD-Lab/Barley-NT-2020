@@ -6,7 +6,7 @@ For each composite/sub-figure and/or table we produce a separate script: e.g., N
 
 # NT Metagenomic assembly, Kraken and dada2 code
 
-=> we are updating this folder with the revised version of the codes
+Scripts for metagenomic analysis included in the NT_scripts directory.
 
 The code used to carry out the metagenomic assembly and functional classification, Kraken2 classification and dada2 16S classification are contained in separate subdirectories of this directory. The contents of each of subdirectory are as follows:
 
